@@ -221,3 +221,12 @@ python tests/e2e_real_models.py        # full pipeline with real Foundry Local m
   strength, the margin over the runner-up, and whether the chunk type matches the question
   type. High confidence means the right passage was probably found — not that the model
   read it correctly, which is exactly why the source panel shows the underlying text.
+
+---
+
+## License
+
+[MIT](LICENSE) © Elifnur Demirezen
+
+The EU regulations themselves are published by the European Union and are not included
+in this repository; download them from EUR-Lex using the links above.
