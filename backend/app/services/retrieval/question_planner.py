@@ -54,6 +54,13 @@ RE_ANNEX_REF = re.compile(r"\bannex\s+([IVXLC]+|\d+)\b", re.IGNORECASE)
 DIRECT_ANSWERABLE = {"definition", "list"}
 
 
+# "What is a 'medical device'?" / "Who is an authorised representative?" -> the term
+RE_SUBJECT = re.compile(
+    r"\b(?:what|who)\s+(?:is|are)\s+(?:a|an|the)?\s*['\"‘’“”]?(.+?)['\"‘’“”]?\s*[?.]?\s*$",
+    re.IGNORECASE,
+)
+
+
 @dataclass
 class QuestionPlan:
     question: str
@@ -65,6 +72,9 @@ class QuestionPlan:
     is_comparison: bool = False
     allows_direct_answer: bool = False
     quoted_terms: list[str] = field(default_factory=list)
+    # The term a definition question is about, used to match against the term a
+    # definition block actually defines.
+    subject_term: str | None = None
 
 
 def _matches_any(text: str, patterns: tuple[str, ...]) -> bool:
@@ -123,6 +133,14 @@ def plan_question(question: str) -> QuestionPlan:
     plan.article_refs = [int(n) for n in RE_ARTICLE_REF.findall(text)]
     plan.annex_refs = [f"Annex {a.upper()}" for a in RE_ANNEX_REF.findall(text)]
     plan.quoted_terms = _extract_quoted_terms(text)
+
+    if plan.question_type == "definition":
+        if plan.quoted_terms:
+            plan.subject_term = plan.quoted_terms[0].lower()
+        elif match := RE_SUBJECT.search(text):
+            candidate = match.group(1).strip().strip("'\"‘’“”").lower()
+            if 2 < len(candidate) < 60:
+                plan.subject_term = candidate
 
     # A comparison always needs synthesis, so it is never directly answerable.
     plan.allows_direct_answer = (

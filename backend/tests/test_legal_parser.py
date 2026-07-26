@@ -2,6 +2,8 @@
 
 from app.services.document_processing.legal_parser import (
     detect_document_kind,
+    extract_defined_term,
+    is_cross_reference_definition,
     parse_pages,
 )
 from tests.conftest import IVDR_SAMPLE, MDR_SAMPLE
@@ -17,6 +19,14 @@ def test_detects_ivdr(ivdr_pages):
     kind, label = detect_document_kind(IVDR_SAMPLE)
     assert kind == "ivdr"
     assert label == "IVDR"
+
+
+def test_ivdr_is_not_mistaken_for_mdr_when_it_cites_it():
+    """Regression: IVDR's definitions cite Regulation (EU) 2017/745 repeatedly, so
+    a bare number search classified IVDR as MDR. Detection must use the title."""
+    kind, label = detect_document_kind(IVDR_SAMPLE)
+    assert (kind, label) == ("ivdr", "IVDR")
+    assert "2017/745" in IVDR_SAMPLE, "sample must contain the cross-reference"
 
 
 def test_detects_generic_regulation():
@@ -52,6 +62,34 @@ def test_definitions_are_classified(mdr_pages):
     definitions = [b for b in result.blocks if b.kind == "definition"]
     assert len(definitions) >= 3
     assert any("medical device" in b.text for b in definitions)
+
+
+def test_extracts_the_defined_term():
+    assert extract_defined_term(
+        "(1) ‘medical device’ means any instrument, apparatus or appliance."
+    ) == "medical device"
+    assert extract_defined_term("1.   Manufacturers shall ensure conformity.") is None
+
+
+def test_detects_a_cross_reference_definition():
+    """IVDR defines shared vocabulary by pointing at MDR rather than repeating it."""
+    redirect = (
+        "(1) ‘medical device’ means ‘medical device’ as defined in point (1) of "
+        "Article 2 of Regulation (EU) 2017/745;"
+    )
+    assert is_cross_reference_definition(redirect)
+
+
+def test_substantive_definition_is_not_a_cross_reference():
+    substantive = (
+        "(1) ‘medical device’ means any instrument, apparatus, appliance, software, "
+        "implant, reagent, material or other article intended by the manufacturer to be "
+        "used, alone or in combination, for human beings for one or more of the specific "
+        "medical purposes of diagnosis, prevention, monitoring, prediction, prognosis, "
+        "treatment or alleviation of disease, and which does not achieve its principal "
+        "intended action by pharmacological means, as defined in Article 2."
+    )
+    assert not is_cross_reference_definition(substantive)
 
 
 def test_definition_paragraph_marker_is_stored_bare(mdr_pages):

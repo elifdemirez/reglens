@@ -19,6 +19,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Iterator
 
+from app.services.document_processing.legal_parser import (
+    extract_defined_term,
+    is_cross_reference_definition,
+)
 from app.services.rag import prompts
 from app.services.rag.highlight import find_supporting_spans
 from app.services.rag.validate import NO_ANSWER_TEXT, is_refusal, validate_answer
@@ -77,6 +81,39 @@ def _refusal(plan: QuestionPlan, sources: list[dict[str, Any]], confidence: floa
     )
 
 
+def _pick_definition(plan: QuestionPlan, results):
+    """Choose the definition chunk that actually answers the question.
+
+    Ranking alone is not enough here. Asking "what is a 'medical device'?" over
+    both regulations puts IVDR Article 2(1) on top, but that entry only says the
+    term means what MDR says it means — quoting it verbatim hands the user a
+    cross-reference instead of a definition. So: prefer a block that defines the
+    term the question named *and* states it substantively.
+    """
+    definitions = [r for r in results if r.chunk_kind == "definition"]
+    if not definitions:
+        return None
+
+    def defines_subject(chunk) -> bool:
+        if not plan.subject_term:
+            return False
+        term = extract_defined_term(chunk.content)
+        return term is not None and term == plan.subject_term
+
+    substantive = [c for c in definitions if not is_cross_reference_definition(c.content)]
+
+    # Best: defines exactly the term asked about, and says something.
+    for chunk in substantive:
+        if defines_subject(chunk):
+            return chunk
+    # Next: the term was not identified, but the top hit is at least substantive.
+    if not plan.subject_term and substantive:
+        return substantive[0]
+    # Only redirects available — let the model explain using the wider context,
+    # which includes the regulation being pointed at.
+    return None
+
+
 def _try_direct_answer(plan: QuestionPlan, results, confidence: float) -> str | None:
     """Return a verbatim excerpt when the question type allows it."""
     if not plan.allows_direct_answer or not results:
@@ -84,10 +121,11 @@ def _try_direct_answer(plan: QuestionPlan, results, confidence: float) -> str | 
     if confidence < DIRECT_ANSWER_CONFIDENCE:
         return None
 
-    top = results[0]
-    if plan.question_type == "definition" and top.chunk_kind == "definition":
-        return f"{top.content}\n\n[{top.citation}]"
-    if plan.question_type == "list" and top.chunk_kind == "list":
+    if plan.question_type == "definition":
+        chunk = _pick_definition(plan, results)
+        return f"{chunk.content}\n\n[{chunk.citation}]" if chunk else None
+    if plan.question_type == "list" and results[0].chunk_kind == "list":
+        top = results[0]
         return f"{top.content}\n\n[{top.citation}]"
     return None
 

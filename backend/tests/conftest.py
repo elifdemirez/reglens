@@ -152,6 +152,7 @@ Subject matter and scope
 Article 2
 Definitions
 For the purposes of this Regulation, the following definitions apply:
+(1) 'medical device' means 'medical device' as defined in point (1) of Article 2 of Regulation (EU) 2017/745;
 (2) 'in vitro diagnostic medical device' means any medical device which is a reagent, calibrator, kit or system intended to be used in vitro for the examination of specimens derived from the human body.
 (3) 'manufacturer' means a natural or legal person who manufactures a device and markets that device under its name.
 

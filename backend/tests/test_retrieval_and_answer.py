@@ -144,6 +144,22 @@ def test_definition_question_takes_the_direct_path(conn, corpus, models):
     assert models.call_count == 0
 
 
+def test_definition_answer_skips_a_cross_reference(conn, corpus, models):
+    """Regression: asking about 'medical device' returned IVDR Article 2(1), which
+    only says the term means what MDR says it means — a dead end for the user.
+    The substantive MDR definition must win instead."""
+    result = answer_question(conn, "What is a 'medical device'?", models)
+    assert result.answer_path == "direct"
+    assert "as defined in point" not in result.answer
+    assert "instrument" in result.answer.lower()
+    assert "MDR" in result.answer
+
+
+def test_definition_answer_matches_the_term_asked_about(conn, corpus, models):
+    result = answer_question(conn, "What is an 'in vitro diagnostic medical device'?", models)
+    assert "reagent" in result.answer.lower()
+
+
 def test_obligation_question_uses_synthesis(conn, corpus, models):
     result = answer_question(conn, "What are the obligations of importers?", models)
     assert result.answer_path == "synthesis"

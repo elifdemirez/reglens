@@ -89,6 +89,55 @@ def _is_noise(line: str) -> bool:
     return any(pattern.match(line) for pattern in RE_NOISE)
 
 
+# "(1) 'medical device' means any instrument, apparatus, ..." -> "medical device"
+RE_DEFINED_TERM = re.compile(
+    r"^\s*\(\d{1,3}\)\s*[‘'\"”“](.+?)[’'\"”“]\s+means\b", re.IGNORECASE
+)
+
+# Sister regulations define shared vocabulary by pointing at each other rather
+# than repeating themselves, e.g. IVDR Article 2(1): "'medical device' means
+# 'medical device' as defined in point (1) of Article 2 of Regulation (EU)
+# 2017/745". Faithful, but a dead end as an answer.
+RE_CROSS_REFERENCE = re.compile(
+    r"\bas\s+defined\s+in\b.{0,120}?\b(Regulation|Directive|Article)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def extract_defined_term(text: str) -> str | None:
+    """Return the term a definition block defines, if it looks like one."""
+    match = RE_DEFINED_TERM.match(text)
+    return match.group(1).strip().lower() if match else None
+
+
+def is_cross_reference_definition(text: str) -> bool:
+    """True when a definition only redirects to another instrument's definition.
+
+    Length matters: a substantive definition may *also* cite another article,
+    but a pure redirect is short, so anything long enough to carry real content
+    is treated as substantive.
+    """
+    stripped = text.strip()
+    if len(stripped) > 320:
+        return False
+    return bool(RE_CROSS_REFERENCE.search(stripped))
+
+
+# A regulation identifies itself in its title block. Matching that, rather than
+# any mention of a number, is what keeps IVDR from being read as MDR: IVDR's
+# definitions cite "Regulation (EU) 2017/745" repeatedly, so a bare number search
+# misclassifies it the moment those pages fall inside the inspected window.
+RE_SELF_TITLE = re.compile(
+    r"REGULATION\s*\(EU\)\s*(\d{4}/\d+)\s+OF\s+THE\s+EUROPEAN\s+PARLIAMENT",
+    re.IGNORECASE,
+)
+
+KNOWN_REGULATIONS = {
+    "2017/745": ("mdr", "MDR"),
+    "2017/746": ("ivdr", "IVDR"),
+}
+
+
 def detect_document_kind(text: str) -> tuple[str, str | None]:
     """Identify well-known regulations from their opening pages.
 
@@ -97,16 +146,24 @@ def detect_document_kind(text: str) -> tuple[str, str | None]:
     "general".
     """
     head = text[:20000]
-    if re.search(r"Regulation\s*\(EU\)\s*2017/745", head) or re.search(
-        r"\bmedical devices\b.*\bRegulation\b", head, re.IGNORECASE | re.DOTALL
-    ):
-        if re.search(r"2017/745", head):
-            return "mdr", "MDR"
-    if re.search(r"Regulation\s*\(EU\)\s*2017/746", head) or re.search(
-        r"in\s*vitro\s*diagnostic", head, re.IGNORECASE
-    ):
-        if re.search(r"2017/746", head):
-            return "ivdr", "IVDR"
+
+    if match := RE_SELF_TITLE.search(head):
+        number = match.group(1)
+        if number in KNOWN_REGULATIONS:
+            return KNOWN_REGULATIONS[number]
+        return "regulation", number
+
+    # No title block (an extract, or a document that starts mid-way). Fall back to
+    # whichever known regulation number appears first, since a document cites
+    # others only after naming itself.
+    positions = [
+        (head.find(number), number)
+        for number in KNOWN_REGULATIONS
+        if head.find(number) != -1
+    ]
+    if positions:
+        _, number = min(positions)
+        return KNOWN_REGULATIONS[number]
 
     # Generic structured legislation: has articles and a regulation/directive title.
     if RE_ARTICLE.search(head) or re.search(r"^\s*Article\s+\d+", head, re.MULTILINE):
